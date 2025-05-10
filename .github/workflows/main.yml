@@ -1,0 +1,133 @@
+name: PC - LiteManager Full Setup
+
+on:
+  workflow_dispatch:
+
+jobs:
+  setup:
+    runs-on: windows-latest
+    timeout-minutes: 9999
+
+    steps:
+      - name: Install LiteManager Server
+        run: |
+          Invoke-WebRequest -Uri "https://www.litemanager.com/soft/litemanager_5.zip" -OutFile "litemanager.zip"
+          Expand-Archive -Path "litemanager.zip" -DestinationPath "$env:USERPROFILE\Desktop\LiteManager"
+
+          $installerPath = "$env:USERPROFILE\Desktop\LiteManager\LiteManager Pro - Server.msi"
+          if (Test-Path $installerPath) {
+            Write-Host "Installer found, starting installation..."
+            Start-Process -FilePath "msiexec.exe" -ArgumentList "/i `"$installerPath`" /quiet /norestart" -Wait
+          } else {
+            Write-Host "Installer not found at: $installerPath"
+            exit 1
+          }
+
+      - name: Set up LiteManager Server
+        run: |
+          $password = "1234"
+          $encodedPass = [System.Text.Encoding]::ASCII.GetBytes($password)
+          $regPaths = @(
+            "HKLM:\SOFTWARE\Wow6432Node\LiteManager\v3.4\Server",
+            "HKLM:\SOFTWARE\LiteManager\v3.4\Server"
+          )
+          $configured = $false
+
+          foreach ($regPath in $regPaths) {
+            if (Test-Path $regPath) {
+              Set-ItemProperty -Path $regPath -Name "Password" -Value $encodedPass
+              New-ItemProperty -Path $regPath -Name "PINEnable" -PropertyType DWord -Value 1 -Force
+              New-ItemProperty -Path $regPath -Name "PIN" -PropertyType String -Value "111111" -Force
+              Start-Service -Name "RMS"
+              Write-Host "LiteManager settings configured successfully at $regPath"
+              $configured = $true
+              break
+            }
+          }
+
+          if (-not $configured) {
+            Write-Host "❌ Registry path for LiteManager not found. Installation might have failed."
+            exit 1
+          }
+
+      - name: Download Files
+        run: |
+          $desktopPath = [System.Environment]::GetFolderPath('Desktop')
+          $filesFolder = "$desktopPath\Files"
+          if (-not (Test-Path $filesFolder)) {
+            New-Item -ItemType Directory -Path $filesFolder
+          }
+          $filesToDownload = @(
+            "BraveSetup.exe",
+            "MEGAsyncSetup64.exe",
+            "DiscordSetup.exe"
+          )
+          $fileUrls = @{
+            "BraveSetup.exe" = "https://laptop-updates.brave.com/latest/winx64";
+            "MEGAsyncSetup64.exe" = "https://mega.nz/MEGAsyncSetup64.exe";
+            "DiscordSetup.exe" = "https://discord.com/api/download?platform=win";
+          }
+          foreach ($file in $filesToDownload) {
+            $filePath = "$filesFolder\$file"
+            if (-not (Test-Path $filePath)) {
+              $fileUrl = $fileUrls[$file]
+              if ($fileUrl -ne $null) {
+                Invoke-WebRequest -Uri $fileUrl -OutFile $filePath
+              } else {
+                Write-Host "URL not found for file: $file"
+              }
+            }
+          }
+
+      - name: Install Applications
+        run: |
+          Invoke-WebRequest "https://download.mozilla.org/?product=firefox-msi-latest-ssl&os=win64&lang=en-US" -OutFile "FirefoxSetup.msi"
+          Start-Process -FilePath "msiexec.exe" -ArgumentList "/i", "FirefoxSetup.msi", "/quiet", "/norestart" -Wait
+
+          Invoke-WebRequest "https://steamcdn-a.akamaihd.net/client/installer/SteamSetup.exe" -OutFile "SteamSetup.exe"
+          Start-Process -FilePath "SteamSetup.exe" -ArgumentList "/S" -Wait
+
+          Invoke-WebRequest "https://launcher-public-service-prod06.ol.epicgames.com/launcher/api/installer/download/EpicGamesLauncherInstaller.msi" -OutFile "EpicGamesLauncherInstaller.msi"
+          Start-Process -FilePath "msiexec.exe" -ArgumentList "/i", "EpicGamesLauncherInstaller.msi", "/quiet", "/norestart" -Wait
+
+          Invoke-WebRequest "https://ubistatic3-a.akamaihd.net/orbit/launcher_installer/UbisoftConnectInstaller.exe" -OutFile "UbisoftConnectInstaller.exe"
+          Start-Process -FilePath "UbisoftConnectInstaller.exe" -ArgumentList "/S" -Wait
+
+          Invoke-WebRequest "https://www.win-rar.com/fileadmin/winrar-versions/winrar/winrar-x64-700.exe" -OutFile "WinRARInstaller.exe"
+          Start-Process -FilePath "WinRARInstaller.exe" -ArgumentList "/S" -Wait
+
+          Invoke-WebRequest "https://webcatalog.io/api/download/?platform=windows&arch=universal" -OutFile "WebCatalog-Setup.exe"
+          Start-Process -FilePath "WebCatalog-Setup.exe" -ArgumentList "/S" -Wait
+
+          Invoke-WebRequest "https://videolan.interhost.co.il/vlc/3.0.16/win64/vlc-3.0.16-win64.exe" -OutFile "vlc-3.0.16-win64.exe"
+          Start-Process -FilePath "vlc-3.0.16-win64.exe" -ArgumentList "/L=1033 /S" -Wait
+
+          Invoke-WebRequest "https://cdn-fastly.obsproject.com/downloads/OBS-Studio-30.1.2-Full-Installer-x64.exe" -OutFile "OBS-Studio-Installer.exe"
+          Start-Process -FilePath "OBS-Studio-Installer.exe" -ArgumentList "/S" -Wait
+
+          $taskbarXPath = "$env:ProgramFiles\TaskbarX"
+          Invoke-WebRequest "https://github.com/ChrisAnd1998/TaskbarX/releases/download/1.7.8.0/TaskbarX_1.7.8.0_x64.zip" -OutFile "TaskbarX.zip"
+          Expand-Archive -Path "TaskbarX.zip" -DestinationPath $taskbarXPath
+          Start-Process -FilePath "$taskbarXPath\TaskbarX.exe" -ArgumentList "-silent"
+
+      - name: Manage Desktop UI
+        run: |
+          reg add HKCU\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize /v AppsUseLightTheme /t REG_DWORD /d 0 /f
+          reg add HKCU\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize /v SystemUsesLightTheme /t REG_DWORD /d 0 /f
+          reg add "HKCU\SOFTWARE\Microsoft\Windows\CurrentVersion\Search" /v SearchboxTaskbarMode /t REG_DWORD /d 1 /f
+          $desktopPath = [System.Environment]::GetFolderPath('Desktop')
+          $shell = New-Object -ComObject WScript.Shell
+          $icons = @{
+            "User's Files" = "shell:Profile"
+            "This PC" = "::{20D04FE0-3AEA-1069-A2D8-08002B30309D}"
+            "Network" = "shell:NetworkPlacesFolder"
+            "Control Panel" = "shell:ControlPanelFolder"
+            "Recycle Bin" = "shell:RecycleBinFolder"
+          }
+          foreach ($icon in $icons.Keys) {
+            $iconPath = "$desktopPath\$icon.lnk"
+            $targetPath = $icons[$icon]
+            $shortcut = $shell.CreateShortcut($iconPath)
+            $shortcut.TargetPath = $targetPath
+            $shortcut.Save()
+          }
